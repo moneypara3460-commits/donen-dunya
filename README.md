@@ -8,6 +8,9 @@ Dönünce yerçekimi ve koşu yönü birlikte değişir: zemin duvar, duvar tava
 - **Sağ yarısına** dokun: dünya sağa döner.
 - Dikenlere değme, yeşil hedefe ulaş. Az dönüşle bitirirsen daha çok yıldız kazanırsın (par = en az dönüş).
 
+## Karakterler
+Sağ üstteki 🎨 düğmesiyle karakter seçilir. Yeni karakterler toplam yıldız sayısına göre açılır (3, 6, 10, 15, 20, 26 ★). İlerleme, yıldızlar ve seçilen karakter cihazda saklanır.
+
 ## Dosyalar
 - `App.js` ekran, animasyon ve oyun döngüsü
 - `engine.js` fizik ve kurallar (ekrandan bağımsız)

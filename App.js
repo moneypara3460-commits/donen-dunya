@@ -6,11 +6,57 @@ import {
 import { D, PS, DT, parseLevel, tileAt, newState, rotate, step, doorOpenAt } from "./engine";
 import { LEVELS } from "./levels";
 import { playSfx } from "./sound";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Her bölümün kendi neon rengi
 const ACCENTS = ["#35e0b5", "#ff7ac6", "#7aa8ff", "#ffc857", "#b388ff", "#ff8a5b", "#5dffb0", "#ff5a7a"];
 const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")"; };
 const CONFETTI = ["#ffd86b", "#ff6b6b", "#6bd6ff", "#9bff8f", "#ff9bf0", "#ffffff"];
+
+// ---------- Karakterler (yıldızla açılır) ----------
+const CHARACTERS = [
+  { id: "turuncu", name: "Turuncu", cost: 0, body: "#ffa733", border: "#ffd98a", glow: "#ffa733", trail: "#ffb347", radius: .3, eyes: "round" },
+  { id: "buz", name: "Buz", cost: 3, body: "#6ad7ff", border: "#d2f4ff", glow: "#6ad7ff", trail: "#9be6ff", radius: .14, eyes: "round" },
+  { id: "slime", name: "Zıp Zıp", cost: 6, body: "#ff7ac6", border: "#ffc2e6", glow: "#ff7ac6", trail: "#ff9bd5", radius: .5, eyes: "dot" },
+  { id: "kedi", name: "Kedi", cost: 10, body: "#a9b4d6", border: "#e1e7fb", glow: "#a9b4d6", trail: "#c3cbe6", radius: .3, eyes: "round", extra: "ears" },
+  { id: "robot", name: "Robot", cost: 15, body: "#5dffb0", border: "#c4ffe5", glow: "#5dffb0", trail: "#8bffc8", radius: .16, eyes: "visor", extra: "antenna" },
+  { id: "altin", name: "Altın", cost: 20, body: "#ffd84a", border: "#fff0a8", glow: "#ffd84a", trail: "#ffe27a", radius: .3, eyes: "round", extra: "crown" },
+  { id: "golge", name: "Gölge", cost: 26, body: "#161b2b", border: "#7aa8ff", glow: "#7aa8ff", trail: "#7aa8ff", radius: .3, eyes: "glow" }
+];
+const STORE_KEY = "donen-dunya-v1";
+
+// Karakter çizimi: g = yerçekimi yönü (0-3), fd = ileri yön. Dünya döndüğü için "yukarı" = yerçekiminin tersi.
+function Hero({ ps, ch, g = 0, dead }) {
+  const gd = D[g], fd = D[(g + 3) % 4], up = [-gd[0], -gd[1]];
+  const at = (u, f, size) => ({ position: "absolute", left: ps / 2 + up[0] * u + fd[0] * f - size / 2, top: ps / 2 + up[1] * u + fd[1] * f - size / 2 });
+  const eyeSize = ps * .27, pupil = ps * .13;
+  const eyePos = (sd) => ({ position: "absolute", left: ps / 2 + fd[0] * ps * .2 + (sd * -fd[1]) * ps * .2 - eyeSize / 2, top: ps / 2 + fd[1] * ps * .2 + (sd * fd[0]) * ps * .2 - eyeSize / 2 });
+  const vertical = up[1] !== 0; // yukarı yön dikeyse çubuklar dikey durur
+  const diamond = (u, f, size, color) => <View key={u + "," + f} style={[at(u, f, size), { width: size, height: size, backgroundColor: color, borderWidth: 1.5, borderColor: ch.border, transform: [{ rotate: "45deg" }] }]} />;
+  return <View style={{ width: ps, height: ps, borderRadius: ps * ch.radius, backgroundColor: ch.body, borderWidth: 2, borderColor: ch.border, shadowColor: ch.glow, shadowOpacity: 1, shadowRadius: 10, opacity: dead ? .2 : 1 }}>
+    <View style={{ position: "absolute", left: ps * .1, top: ps * .08, width: ps * .45, height: ps * .2, borderRadius: ps, backgroundColor: "rgba(255,255,255,.3)" }} />
+    {ch.extra === "ears" && [-1, 1].map(sd => diamond(ps * .5, sd * ps * .26, ps * .26, ch.body))}
+    {ch.extra === "antenna" && <>
+      <View style={[at(ps * .6, 0, ps * .2), { width: vertical ? 2 : ps * .2, height: vertical ? ps * .2 : 2, backgroundColor: ch.border }]} />
+      <View style={[at(ps * .74, 0, ps * .16), { width: ps * .16, height: ps * .16, borderRadius: ps, backgroundColor: "#ff5a7a", shadowColor: "#ff5a7a", shadowOpacity: 1, shadowRadius: 6 }]} />
+    </>}
+    {ch.extra === "crown" && [-1, 0, 1].map(k => diamond(ps * (k === 0 ? .62 : .54), k * ps * .24, k === 0 ? ps * .26 : ps * .2, "#ff4d6d"))}
+    {ch.eyes === "visor" ? (() => {
+      const vw = vertical ? ps * .2 : ps * .52, vh = vertical ? ps * .52 : ps * .2; // ileri yöne dik, uzun bir vizör
+      return <View style={{ position: "absolute", left: ps / 2 + fd[0] * ps * .2 - vw / 2, top: ps / 2 + fd[1] * ps * .2 - vh / 2, width: vw, height: vh, borderRadius: ps * .1, backgroundColor: "#0b2a20" }}>
+        <View style={{ position: "absolute", left: "14%", top: "14%", right: "14%", bottom: "14%", borderRadius: ps * .08, backgroundColor: "#7dffd0" }} />
+      </View>;
+    })()
+    : [-1, 1].map(sd => ch.eyes === "round" ? (
+      <View key={sd} style={[eyePos(sd), { width: eyeSize, height: eyeSize, borderRadius: eyeSize, backgroundColor: "#fff", overflow: "hidden" }]}>
+        <View style={{ position: "absolute", width: pupil, height: pupil, borderRadius: pupil, backgroundColor: "#2b1a05", left: eyeSize / 2 - pupil / 2 + fd[0] * eyeSize * .18, top: eyeSize / 2 - pupil / 2 + fd[1] * eyeSize * .18 }} />
+      </View>) : ch.eyes === "dot" ? (
+      <View key={sd} style={[eyePos(sd), { width: ps * .15, height: ps * .15, borderRadius: ps, backgroundColor: "#3a0f2a" }]} />
+      ) : (
+      <View key={sd} style={[eyePos(sd), { width: ps * .2, height: ps * .2, borderRadius: ps, backgroundColor: "#8be9ff", shadowColor: "#8be9ff", shadowOpacity: 1, shadowRadius: 6 }]} />
+    ))}
+  </View>;
+}
 
 // ---------- Hedef (nabız gibi atan portal) ----------
 function Goal({ tile }) {
@@ -138,6 +184,11 @@ export default function App() {
   const [soundOn, setSoundOn] = useState(true);
   const [runCount, setRunCount] = useState(0);   // kaydedilmiş hayalet sayısı
   const [notice, setNotice] = useState("");
+  const [heroId, setHeroId] = useState("turuncu");
+  const [picker, setPicker] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [unlockMsg, setUnlockMsg] = useState("");
+  const starsRef = useRef({});
 
   const level = LEVELS[levelIndex];
   const accent = ACCENTS[levelIndex % ACCENTS.length];
@@ -158,6 +209,27 @@ export default function App() {
   const deadTimer = useRef(null);
   const sfx = n => { if (soundRef.current) playSfx(n); };
 
+  // Kayıt: yıldızlar, açılan bölümler, seçilen karakter
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(STORE_KEY);
+        if (raw) {
+          const d = JSON.parse(raw);
+          if (d.stars) { setStars(d.stars); starsRef.current = d.stars; }
+          if (typeof d.unlocked === "number") setUnlocked(Math.min(d.unlocked, LEVELS.length - 1));
+          if (d.heroId && CHARACTERS.some(c => c.id === d.heroId)) setHeroId(d.heroId);
+          if (d.sound === false) { soundRef.current = false; setSoundOn(false); }
+        }
+      } catch (e) {}
+      setLoaded(true);
+    })();
+  }, []);
+  useEffect(() => {
+    if (!loaded) return;
+    AsyncStorage.setItem(STORE_KEY, JSON.stringify({ stars, unlocked, heroId, sound: soundOn })).catch(() => {});
+  }, [stars, unlocked, heroId, soundOn, loaded]);
+
   // Arka plandaki sabit yıldızlar (dünya dönerken yerinde kalır, derinlik hissi verir)
   const stars2 = useMemo(() => {
     let seed = 7 + levelIndex * 13;
@@ -173,7 +245,7 @@ export default function App() {
     trailRef.current = [];
     angleRef.current = 0;
     angle.stopAnimation(); angle.setValue(0);
-    flash.setValue(0); shake.setValue(0);
+    flash.setValue(0); shake.setValue(0); setUnlockMsg("");
     setPos({ x: stateRef.current.x, y: stateRef.current.y, g: 0 });
     setTurns(0); setSecs(0);
     setPhase(autoRun ? "run" : "ready");
@@ -226,7 +298,13 @@ export default function App() {
         sfx("win");
         const par = level.par, total = baseTurnsRef.current + s.turns;
         const st = total <= par ? 3 : total <= par + 2 ? 2 : 1;
-        setStars(o => ({ ...o, [levelIndex]: Math.max(o[levelIndex] || 0, st) }));
+        const before = Object.values(starsRef.current).reduce((a, b) => a + b, 0);
+        const next = { ...starsRef.current, [levelIndex]: Math.max(starsRef.current[levelIndex] || 0, st) };
+        starsRef.current = next;
+        const after = Object.values(next).reduce((a, b) => a + b, 0);
+        const fresh = CHARACTERS.filter(c => c.cost > before && c.cost <= after);
+        setUnlockMsg(fresh.length ? "🎉 Yeni karakter açıldı: " + fresh.map(c => c.name).join(", ") + "!" : "");
+        setStars(next);
         setUnlocked(u => Math.max(u, Math.min(levelIndex + 1, LEVELS.length - 1)));
         setPhase("won");
         return;
@@ -249,7 +327,8 @@ export default function App() {
   function toggleSound() { const next = !soundOn; soundRef.current = next; setSoundOn(next); if (next) playSfx("tick"); }
 
   const rot = angle.interpolate({ inputRange: [0, 360], outputRange: ["0deg", "360deg"] });
-  const fd = D[(pos.g + 3) % 4];
+  const hero = CHARACTERS.find(c => c.id === heroId) || CHARACTERS[0];
+  const totalStars = Object.values(stars).reduce((a, b) => a + b, 0);
   const ps = PS * tile;
   const starCount = stars[levelIndex] || 0;
   const lastLevel = levelIndex === LEVELS.length - 1;
@@ -260,12 +339,6 @@ export default function App() {
   const lit = runs.filter(r => frames >= r.path.length - 1).map(r => r.button).join("|");
   const isGhostLevel = lv.buttons.length > 0;
   const shownTurns = baseTurnsRef.current + turns;
-  const eyeSize = ps * .27, pupil = ps * .13;
-  const eyeAt = (side) => { // gözler ileri yönde, iki yanda
-    const cx = ps / 2 + fd[0] * ps * .2 + (side * -fd[1]) * ps * .2;
-    const cy = ps / 2 + fd[1] * ps * .2 + (side * fd[0]) * ps * .2;
-    return { left: cx - eyeSize / 2, top: cy - eyeSize / 2 };
-  };
 
   return <SafeAreaView style={styles.safe}>
     <StatusBar barStyle="light-content" />
@@ -279,6 +352,7 @@ export default function App() {
         <Text style={styles.title}>DÖNEN DÜNYA</Text>
       </View>
       <View style={{ flexDirection: "row", gap: 8 }}>
+        <Pressable onPress={() => setPicker(true)} style={styles.iconBtn}><Text style={{ fontSize: 16 }}>🎨</Text></Pressable>
         <Pressable onPress={toggleSound} style={styles.iconBtn}><Text style={{ fontSize: 16 }}>{soundOn ? "🔊" : "🔇"}</Text></Pressable>
         <Pressable onPress={() => resetLevel(false)} style={[styles.restart, { backgroundColor: accent }]}><Text style={styles.restartText}>↻ Baştan</Text></Pressable>
       </View>
@@ -321,17 +395,11 @@ export default function App() {
             {/* iz */}
             {trail.map((p, i) => {
               const k = (i + 1) / trail.length, sz = ps * (.25 + .55 * k);
-              return <View key={i} pointerEvents="none" style={{ position: "absolute", left: p.x * tile - sz / 2, top: p.y * tile - sz / 2, width: sz, height: sz, borderRadius: sz * .3, backgroundColor: "#ffb347", opacity: .05 + .28 * k }} />;
+              return <View key={i} pointerEvents="none" style={{ position: "absolute", left: p.x * tile - sz / 2, top: p.y * tile - sz / 2, width: sz, height: sz, borderRadius: sz * .3, backgroundColor: hero.trail, opacity: .05 + .28 * k }} />;
             })}
             {/* oyuncu */}
-            <View pointerEvents="none" style={[styles.player, {
-              left: (pos.x - PS / 2) * tile, top: (pos.y - PS / 2) * tile, width: ps, height: ps, borderRadius: ps * .3,
-              opacity: phase === "dead" ? 0.2 : 1
-            }]}>
-              <View style={{ position: "absolute", left: ps * .1, top: ps * .08, width: ps * .45, height: ps * .2, borderRadius: ps, backgroundColor: "rgba(255,255,255,.35)" }} />
-              {[-1, 1].map(sd => <View key={sd} style={[styles.eyeWhite, { width: eyeSize, height: eyeSize, borderRadius: eyeSize }, eyeAt(sd)]}>
-                <View style={{ position: "absolute", width: pupil, height: pupil, borderRadius: pupil, backgroundColor: "#2b1a05", left: eyeSize / 2 - pupil / 2 + fd[0] * eyeSize * .18, top: eyeSize / 2 - pupil / 2 + fd[1] * eyeSize * .18 }} />
-              </View>)}
+            <View pointerEvents="none" style={{ position: "absolute", left: (pos.x - PS / 2) * tile, top: (pos.y - PS / 2) * tile, width: ps, height: ps }}>
+              <Hero ps={ps} ch={hero} g={pos.g} dead={phase === "dead"} />
             </View>
           </Animated.View>
           <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: "#ff3b2f", opacity: flash.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }) }]} />
@@ -353,6 +421,7 @@ export default function App() {
             <Text style={styles.winEmoji}>🏁</Text>
             <Text style={styles.overlayTitle}>{lastLevel ? "HEPSİNİ BİTİRDİN!" : "BÖLÜM TAMAM"}</Text>
             <Text style={styles.stars}>{"★".repeat(starCount)}<Text style={{ color: "#3b4d45" }}>{"★".repeat(3 - starCount)}</Text></Text>
+            {!!unlockMsg && <Text style={[styles.overlayText, { color: "#ffd86b", fontWeight: "900" }]}>{unlockMsg}</Text>}
             <Text style={styles.overlayText}>{shownTurns} dönüş • {secs.toFixed(1)} sn{deaths ? " • " + deaths + " ölüm" : ""}</Text>
             <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
               <Pressable onPress={() => resetLevel(false)} style={[styles.btnGhost, { borderColor: accent }]}><Text style={[styles.btnGhostText, { color: accent }]}>↻ Tekrar</Text></Pressable>
@@ -364,6 +433,31 @@ export default function App() {
         </View>
       </Animated.View>
     </View>
+
+    {picker && <View style={styles.pickerWrap}>
+      <View style={styles.picker}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <View>
+            <Text style={[styles.eyebrow, { color: accent }]}>KARAKTER SEÇ</Text>
+            <Text style={styles.pickerTitle}>⭐ {totalStars} yıldız</Text>
+          </View>
+          <Pressable onPress={() => setPicker(false)} style={styles.iconBtn}><Text style={{ color: "#fff", fontWeight: "900" }}>✕</Text></Pressable>
+        </View>
+        <View style={styles.pickerGrid}>
+          {CHARACTERS.map(c => {
+            const locked = c.cost > totalStars, sel = c.id === heroId;
+            return <Pressable key={c.id} disabled={locked} onPress={() => { setHeroId(c.id); sfx("tick"); }}
+              style={[styles.card, sel && { borderColor: accent, backgroundColor: rgba(accent, .12) }, locked && { opacity: .55 }]}>
+              <View style={{ height: 64, alignItems: "center", justifyContent: "center" }}>
+                {locked ? <Text style={{ fontSize: 28 }}>🔒</Text> : <Hero ps={42} ch={c} g={0} />}
+              </View>
+              <Text style={styles.cardName}>{c.name}</Text>
+              <Text style={[styles.cardSub, sel && { color: accent }]}>{sel ? "✓ Seçili" : locked ? c.cost + " ★ gerek" : "Seç"}</Text>
+            </Pressable>;
+          })}
+        </View>
+      </View>
+    </View>}
 
     <Text style={styles.footer}>Sol yarıya dokun: dünya sola döner • Sağ yarıya dokun: dünya sağa döner</Text>
   </SafeAreaView>;
@@ -404,5 +498,12 @@ const styles = StyleSheet.create({
   btnText: { color: "#0b1512", fontWeight: "900", fontSize: 13 },
   btnGhost: { borderWidth: 1.5, paddingVertical: 10, paddingHorizontal: 16, borderRadius: 12 },
   btnGhostText: { fontWeight: "900", fontSize: 13 },
+  pickerWrap: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(4,9,8,.86)", justifyContent: "center", padding: 16, zIndex: 50 },
+  picker: { backgroundColor: "#0e1b17", borderRadius: 18, borderWidth: 1.5, borderColor: "rgba(255,255,255,.14)", padding: 16 },
+  pickerTitle: { color: "#f6ecc8", fontSize: 20, fontWeight: "900", marginTop: 2 },
+  pickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 14 },
+  card: { width: "30.5%", flexGrow: 1, backgroundColor: "rgba(255,255,255,.05)", borderRadius: 14, borderWidth: 1.5, borderColor: "rgba(255,255,255,.12)", padding: 8, alignItems: "center" },
+  cardName: { color: "#f2e5c0", fontWeight: "900", fontSize: 12, marginTop: 2 },
+  cardSub: { color: "#9fb0a6", fontSize: 10, fontWeight: "700", marginTop: 2 },
   footer: { textAlign: "center", fontSize: 10, color: "#718477", marginTop: 14, paddingHorizontal: 16, lineHeight: 15 }
 });
