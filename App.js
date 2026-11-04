@@ -5,8 +5,14 @@ import {
 } from "react-native";
 import { D, PS, DT, parseLevel, tileAt, newState, rotate, step } from "./engine";
 import { LEVELS } from "./levels";
+import { playSfx } from "./sound";
 
-// ---------- Bölüm görünümü (yalnızca bölüm değişince çizilir) ----------
+// Her bölümün kendi neon rengi
+const ACCENTS = ["#35e0b5", "#ff7ac6", "#7aa8ff", "#ffc857", "#b388ff", "#ff8a5b", "#5dffb0", "#ff5a7a"];
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")"; };
+const CONFETTI = ["#ffd86b", "#ff6b6b", "#6bd6ff", "#9bff8f", "#ff9bf0", "#ffffff"];
+
+// ---------- Hedef (nabız gibi atan portal) ----------
 function Goal({ tile }) {
   const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -17,38 +23,75 @@ function Goal({ tile }) {
     loop.start();
     return () => loop.stop();
   }, []);
-  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [.85, 1.12] });
+  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [.85, 1.18] });
+  const fade = pulse.interpolate({ inputRange: [0, 1], outputRange: [.9, .35] });
   return <View style={{ width: tile, height: tile, alignItems: "center", justifyContent: "center" }}>
-    <Animated.View style={[styles.goalOuter, { width: tile * .8, height: tile * .8, borderRadius: tile, transform: [{ scale }] }]}>
-      <View style={[styles.goalInner, { width: tile * .4, height: tile * .4, borderRadius: tile }]} />
+    <Animated.View style={{ position: "absolute", width: tile * .95, height: tile * .95, borderRadius: tile, backgroundColor: "rgba(93,255,176,.18)", opacity: fade, transform: [{ scale }] }} />
+    <Animated.View style={[styles.goalOuter, { width: tile * .7, height: tile * .7, borderRadius: tile, transform: [{ scale }] }]}>
+      <View style={{ width: tile * .3, height: tile * .3, borderRadius: tile, backgroundColor: "#5dffb0" }} />
     </Animated.View>
   </View>;
 }
 
-const LevelView = memo(function LevelView({ lv, tile }) {
+// ---------- Bölüm görünümü (yalnızca bölüm değişince çizilir) ----------
+const LevelView = memo(function LevelView({ lv, tile, accent }) {
   const items = [];
+  const t = Math.max(2, tile * .09);
+  const isWall = (c, r) => tileAt(lv, c, r) === "#";
   for (let r = 0; r < lv.rows; r++) for (let c = 0; c < lv.cols; c++) {
     const ch = lv.cells[r][c];
-    if (ch === " ") continue;
     const pos = { position: "absolute", left: c * tile, top: r * tile, width: tile, height: tile };
+    const key = r + "-" + c;
     if (ch === "#") {
-      items.push(<View key={r + "-" + c} style={[pos, styles.wall]} />);
+      // Duvar: koyu dolgu + sadece boşluğa bakan kenarlarda parlayan neon çizgi
+      items.push(<View key={key} style={[pos, {
+        backgroundColor: rgba(accent, .09),
+        borderTopWidth: isWall(c, r - 1) ? 0 : t, borderTopColor: accent,
+        borderBottomWidth: isWall(c, r + 1) ? 0 : t, borderBottomColor: accent,
+        borderLeftWidth: isWall(c - 1, r) ? 0 : t, borderLeftColor: accent,
+        borderRightWidth: isWall(c + 1, r) ? 0 : t, borderRightColor: accent
+      }]} />);
+    } else if (ch === " ") {
+      items.push(<View key={key} pointerEvents="none" style={[pos, { alignItems: "center", justifyContent: "center" }]}>
+        <View style={{ width: tile * .08, height: tile * .08, borderRadius: tile, backgroundColor: rgba(accent, .16) }} />
+      </View>);
     } else if (ch === "^") {
-      // diken, bitişik duvarın tersine bakar
       let rot = "0deg";
-      if (tileAt(lv, c, r + 1) === "#") rot = "0deg";
-      else if (tileAt(lv, c, r - 1) === "#") rot = "180deg";
-      else if (tileAt(lv, c - 1, r) === "#") rot = "90deg";
-      else if (tileAt(lv, c + 1, r) === "#") rot = "-90deg";
-      items.push(<View key={r + "-" + c} style={[pos, { alignItems: "center", justifyContent: "center" }]}>
-        <Text style={{ fontSize: tile * .95, lineHeight: tile * 1.05, color: "#ff5a4a", transform: [{ rotate: rot }] }}>▲</Text>
+      if (isWall(c, r + 1)) rot = "0deg";
+      else if (isWall(c, r - 1)) rot = "180deg";
+      else if (isWall(c - 1, r)) rot = "90deg";
+      else if (isWall(c + 1, r)) rot = "-90deg";
+      items.push(<View key={key} style={[pos, { alignItems: "center", justifyContent: "center" }]}>
+        <Text style={{ fontSize: tile * .95, lineHeight: tile * 1.05, color: "#ff4d3d", textShadowColor: "#ff2a1a", textShadowRadius: 10, textShadowOffset: { width: 0, height: 0 }, transform: [{ rotate: rot }] }}>▲</Text>
       </View>);
     } else if (ch === "G") {
-      items.push(<View key={r + "-" + c} style={pos}><Goal tile={tile} /></View>);
+      items.push(<View key={key} style={pos}><Goal tile={tile} /></View>);
     }
   }
   return <>{items}</>;
 });
+
+// ---------- Konfeti ----------
+function Confetti({ w, h }) {
+  const parts = useRef(Array.from({ length: 30 }, (_, i) => ({
+    x: Math.random() * Math.max(w - 10, 1), size: 5 + Math.random() * 6, delay: Math.random() * 1400, dur: 2000 + Math.random() * 1600,
+    color: CONFETTI[i % CONFETTI.length], spin: Math.random() > .5 ? 1 : -1, v: new Animated.Value(0)
+  }))).current;
+  useEffect(() => {
+    const anims = parts.map(p => Animated.loop(Animated.timing(p.v, { toValue: 1, duration: p.dur, delay: p.delay, easing: Easing.linear, useNativeDriver: true })));
+    anims.forEach(a => a.start());
+    return () => anims.forEach(a => a.stop());
+  }, []);
+  return <View pointerEvents="none" style={StyleSheet.absoluteFill}>{parts.map((p, i) =>
+    <Animated.View key={i} style={{
+      position: "absolute", left: p.x, top: -20, width: p.size, height: p.size * 1.6, backgroundColor: p.color, borderRadius: 2,
+      transform: [
+        { translateY: p.v.interpolate({ inputRange: [0, 1], outputRange: [0, h + 40] }) },
+        { translateX: p.v.interpolate({ inputRange: [0, .5, 1], outputRange: [0, 14 * p.spin, -14 * p.spin] }) },
+        { rotate: p.v.interpolate({ inputRange: [0, 1], outputRange: ["0deg", (p.spin * 720) + "deg"] }) }
+      ]
+    }} />)}</View>;
+}
 
 // ---------- Ana uygulama ----------
 export default function App() {
@@ -62,35 +105,50 @@ export default function App() {
   const [turns, setTurns] = useState(0);
   const [secs, setSecs] = useState(0);
   const [deaths, setDeaths] = useState(0);
+  const [soundOn, setSoundOn] = useState(true);
 
   const level = LEVELS[levelIndex];
+  const accent = ACCENTS[levelIndex % ACCENTS.length];
   const lv = useMemo(() => parseLevel(level.rows), [levelIndex]);
-  const size = Math.max(200, Math.min(width - 24, height * 0.5, 420));
+  const size = Math.max(220, Math.min(width - 28, height * 0.5, 420));
   const tile = size / lv.cols;
 
   const stateRef = useRef(newState(lv));
+  const trailRef = useRef([]);
   const angleRef = useRef(0);
+  const soundRef = useRef(true);
   const angle = useRef(new Animated.Value(0)).current;
   const flash = useRef(new Animated.Value(0)).current;
+  const shake = useRef(new Animated.Value(0)).current;
   const deadTimer = useRef(null);
+  const sfx = n => { if (soundRef.current) playSfx(n); };
+
+  // Arka plandaki sabit yıldızlar (dünya dönerken yerinde kalır, derinlik hissi verir)
+  const stars2 = useMemo(() => {
+    let seed = 7 + levelIndex * 13;
+    const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+    return Array.from({ length: 34 }, () => ({ x: rnd() * size, y: rnd() * size, s: 1 + rnd() * 2.2, o: .15 + rnd() * .45 }));
+  }, [levelIndex, size]);
 
   function resetLevel(autoRun) {
     clearTimeout(deadTimer.current);
     stateRef.current = newState(lv);
+    trailRef.current = [];
     angleRef.current = 0;
     angle.stopAnimation(); angle.setValue(0);
-    flash.setValue(0);
+    flash.setValue(0); shake.setValue(0);
     setPos({ x: stateRef.current.x, y: stateRef.current.y, g: 0 });
     setTurns(0); setSecs(0);
     setPhase(autoRun ? "run" : "ready");
     setAttempt(a => a + 1);
   }
   useEffect(() => { setDeaths(0); resetLevel(false); }, [levelIndex]);
+  useEffect(() => () => clearTimeout(deadTimer.current), []);
 
   // Oyun döngüsü: sabit adımlı fizik
   useEffect(() => {
     if (phase !== "run") return;
-    let raf, last = null, acc = 0, alive = true;
+    let raf, last = null, acc = 0, alive = true, n = 0;
     const tick = (t) => {
       if (!alive) return;
       if (last === null) last = t;
@@ -98,19 +156,23 @@ export default function App() {
       let s = stateRef.current;
       while (acc >= DT && s.status === "run") { s = step(lv, s, DT); acc -= DT; }
       stateRef.current = s;
+      if ((n++ % 2) === 0) { const tr = trailRef.current; tr.push({ x: s.x, y: s.y }); if (tr.length > 9) tr.shift(); }
       setPos({ x: s.x, y: s.y, g: s.g });
       setSecs(Math.floor(s.frames / 6) / 10);
       if (s.status === "dead") {
+        sfx("die");
         setDeaths(d => d + 1);
         flash.setValue(1);
         Animated.timing(flash, { toValue: 0, duration: 600, useNativeDriver: true }).start();
+        Animated.sequence([-9, 9, -6, 6, -3, 0].map(v => Animated.timing(shake, { toValue: v, duration: 50, useNativeDriver: true }))).start();
         setPhase("dead");
-        deadTimer.current = setTimeout(() => resetLevel(true), 650);
+        deadTimer.current = setTimeout(() => resetLevel(true), 700);
         return;
       }
       if (s.status === "won") {
-        const t2 = s.turns, par = level.par;
-        const st = t2 <= par ? 3 : t2 <= par + 2 ? 2 : 1;
+        sfx("win");
+        const par = level.par;
+        const st = s.turns <= par ? 3 : s.turns <= par + 2 ? 2 : 1;
         setStars(o => ({ ...o, [levelIndex]: Math.max(o[levelIndex] || 0, st) }));
         setUnlocked(u => Math.max(u, Math.min(levelIndex + 1, LEVELS.length - 1)));
         setPhase("won");
@@ -123,64 +185,90 @@ export default function App() {
   }, [phase, attempt, levelIndex]);
 
   function onTap(dir) { // dir: +1 sol dokunuş, -1 sağ dokunuş
-    if (phase === "ready") { setPhase("run"); return; }
+    if (phase === "ready") { sfx("tick"); setPhase("run"); return; }
     if (phase !== "run") return;
+    sfx("rotate");
     stateRef.current = rotate(stateRef.current, dir);
     setTurns(stateRef.current.turns);
     angleRef.current += dir === 1 ? -90 : 90; // sol: dünya sola, sağ: dünya sağa döner
     Animated.spring(angle, { toValue: angleRef.current, friction: 6, tension: 95, useNativeDriver: true }).start();
   }
+  function toggleSound() { const next = !soundOn; soundRef.current = next; setSoundOn(next); if (next) playSfx("tick"); }
 
   const rot = angle.interpolate({ inputRange: [0, 360], outputRange: ["0deg", "360deg"] });
   const fd = D[(pos.g + 3) % 4];
   const ps = PS * tile;
-  const earOff = ps * 0.22;
   const starCount = stars[levelIndex] || 0;
   const lastLevel = levelIndex === LEVELS.length - 1;
+  const trail = trailRef.current;
+  const eyeSize = ps * .27, pupil = ps * .13;
+  const eyeAt = (side) => { // gözler ileri yönde, iki yanda
+    const cx = ps / 2 + fd[0] * ps * .2 + (side * -fd[1]) * ps * .2;
+    const cy = ps / 2 + fd[1] * ps * .2 + (side * fd[0]) * ps * .2;
+    return { left: cx - eyeSize / 2, top: cy - eyeSize / 2 };
+  };
 
   return <SafeAreaView style={styles.safe}>
     <StatusBar barStyle="light-content" />
+    {/* arka plan ışıkları */}
+    <View pointerEvents="none" style={[styles.blob, { top: -90, right: -70, width: 260, height: 260, backgroundColor: rgba(accent, .10) }]} />
+    <View pointerEvents="none" style={[styles.blob, { bottom: -110, left: -90, width: 300, height: 300, backgroundColor: rgba(accent, .07) }]} />
+
     <View style={styles.header}>
       <View>
-        <Text style={styles.eyebrow}>YERÇEKİMİ PARKURU</Text>
+        <Text style={[styles.eyebrow, { color: accent }]}>YERÇEKİMİ PARKURU</Text>
         <Text style={styles.title}>DÖNEN DÜNYA</Text>
       </View>
-      <Pressable onPress={() => resetLevel(false)} style={styles.restart}><Text style={styles.restartText}>↻ Baştan</Text></Pressable>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Pressable onPress={toggleSound} style={styles.iconBtn}><Text style={{ fontSize: 16 }}>{soundOn ? "🔊" : "🔇"}</Text></Pressable>
+        <Pressable onPress={() => resetLevel(false)} style={[styles.restart, { backgroundColor: accent }]}><Text style={styles.restartText}>↻ Baştan</Text></Pressable>
+      </View>
     </View>
 
     <View style={styles.chips}>
       {LEVELS.map((L, i) => {
-        const locked = i > unlocked, active = i === levelIndex;
+        const locked = i > unlocked, active = i === levelIndex, a = ACCENTS[i % ACCENTS.length];
         return <Pressable key={i} disabled={locked} onPress={() => setLevelIndex(i)}
-          style={[styles.chip, active && styles.chipActive, locked && styles.chipLocked]}>
-          <Text style={[styles.chipText, active && styles.chipTextActive]}>{locked ? "🔒" : i + 1}</Text>
-          {!locked && !!stars[i] && <Text style={styles.chipStars}>{"★".repeat(stars[i])}</Text>}
+          style={[styles.chip, active && { backgroundColor: a, borderColor: a }, locked && styles.chipLocked]}>
+          <Text style={[styles.chipText, active && { color: "#0b1512" }]}>{locked ? "🔒" : i + 1}</Text>
+          {!locked && !!stars[i] && <Text style={[styles.chipStars, active && { color: "#0b1512" }]}>{"★".repeat(stars[i])}</Text>}
         </Pressable>;
       })}
     </View>
 
     <View style={styles.statRow}>
-      <View style={styles.stat}><Text style={styles.statLabel}>BÖLÜM</Text><Text style={styles.statValue}>{levelIndex + 1} • {level.name}</Text></View>
+      <View style={styles.stat}><Text style={styles.statLabel}>BÖLÜM</Text><Text style={styles.statValue} numberOfLines={1}>{levelIndex + 1} • {level.name}</Text></View>
       <View style={styles.stat}><Text style={styles.statLabel}>DÖNÜŞ</Text><Text style={styles.statValue}>{turns} <Text style={styles.statSub}>/ par {level.par}</Text></Text></View>
       <View style={styles.stat}><Text style={styles.statLabel}>SÜRE</Text><Text style={styles.statValue}>{secs.toFixed(1)}s</Text></View>
     </View>
 
-    <View style={{ alignItems: "center", marginTop: 10 }}>
-      <View style={[styles.boardFrame, { width: size + 12, height: size + 12 }]}>
-        <View style={{ width: size, height: size, overflow: "hidden", borderRadius: 6, backgroundColor: "#0f1d19" }}>
+    <View style={{ alignItems: "center", marginTop: 12 }}>
+      <Animated.View style={[styles.boardFrame, { width: size + 14, height: size + 14, borderColor: accent, shadowColor: accent, transform: [{ translateX: shake }] }]}>
+        <View style={{ width: size, height: size, overflow: "hidden", borderRadius: 8, backgroundColor: "#081210" }}>
+          {/* sabit yıldızlar */}
+          {stars2.map((s, i) => <View key={i} pointerEvents="none" style={{ position: "absolute", left: s.x, top: s.y, width: s.s, height: s.s, borderRadius: s.s, backgroundColor: "#fff", opacity: s.o }} />)}
+
           <Animated.View style={{ width: size, height: size, transform: [{ rotate: rot }] }}>
-            <LevelView lv={lv} tile={tile} />
+            <LevelView lv={lv} tile={tile} accent={accent} />
+            {/* iz */}
+            {trail.map((p, i) => {
+              const k = (i + 1) / trail.length, sz = ps * (.25 + .55 * k);
+              return <View key={i} pointerEvents="none" style={{ position: "absolute", left: p.x * tile - sz / 2, top: p.y * tile - sz / 2, width: sz, height: sz, borderRadius: sz * .3, backgroundColor: "#ffb347", opacity: .05 + .28 * k }} />;
+            })}
+            {/* oyuncu */}
             <View pointerEvents="none" style={[styles.player, {
-              left: (pos.x - PS / 2) * tile, top: (pos.y - PS / 2) * tile, width: ps, height: ps, borderRadius: ps * .28,
-              opacity: phase === "dead" ? 0.25 : 1
+              left: (pos.x - PS / 2) * tile, top: (pos.y - PS / 2) * tile, width: ps, height: ps, borderRadius: ps * .3,
+              opacity: phase === "dead" ? 0.2 : 1
             }]}>
-              <View style={[styles.eye, { width: ps * .2, height: ps * .2, borderRadius: ps, left: ps / 2 - ps * .1 + fd[0] * earOff - fd[1] * ps * .14, top: ps / 2 - ps * .1 + fd[1] * earOff + fd[0] * ps * .14 }]} />
-              <View style={[styles.eye, { width: ps * .2, height: ps * .2, borderRadius: ps, left: ps / 2 - ps * .1 + fd[0] * earOff + fd[1] * ps * .14, top: ps / 2 - ps * .1 + fd[1] * earOff - fd[0] * ps * .14 }]} />
+              <View style={{ position: "absolute", left: ps * .1, top: ps * .08, width: ps * .45, height: ps * .2, borderRadius: ps, backgroundColor: "rgba(255,255,255,.35)" }} />
+              {[-1, 1].map(sd => <View key={sd} style={[styles.eyeWhite, { width: eyeSize, height: eyeSize, borderRadius: eyeSize }, eyeAt(sd)]}>
+                <View style={{ position: "absolute", width: pupil, height: pupil, borderRadius: pupil, backgroundColor: "#2b1a05", left: eyeSize / 2 - pupil / 2 + fd[0] * eyeSize * .18, top: eyeSize / 2 - pupil / 2 + fd[1] * eyeSize * .18 }} />
+              </View>)}
             </View>
           </Animated.View>
-          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: "#ff3b2f", opacity: flash.interpolate({ inputRange: [0, 1], outputRange: [0, 0.45] }) }]} />
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: "#ff3b2f", opacity: flash.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }) }]} />
 
-          {/* Dokunma bölgeleri: sol yarı / sağ yarı */}
+          {/* Dokunma bölgeleri */}
           <View style={StyleSheet.absoluteFill}>
             <View style={{ flex: 1, flexDirection: "row" }}>
               <Pressable style={styles.zone} onPressIn={() => onTap(1)}>{phase !== "won" && <Text style={styles.zoneHint}>⟲</Text>}</Pressable>
@@ -189,22 +277,24 @@ export default function App() {
           </View>
 
           {phase === "ready" && <View pointerEvents="none" style={styles.overlay}>
-            <Text style={styles.overlayTitle}>DOKUN VE KOŞ</Text>
+            <Text style={[styles.overlayTitle, { color: accent }]}>DOKUN VE KOŞ</Text>
             <Text style={styles.overlayText}>{level.hint}</Text>
           </View>}
 
-          {phase === "won" && <View style={styles.overlay}>
+          {phase === "won" && <View pointerEvents="box-none" style={styles.winOverlay}>
             <Text style={styles.winEmoji}>🏁</Text>
             <Text style={styles.overlayTitle}>{lastLevel ? "HEPSİNİ BİTİRDİN!" : "BÖLÜM TAMAM"}</Text>
             <Text style={styles.stars}>{"★".repeat(starCount)}<Text style={{ color: "#3b4d45" }}>{"★".repeat(3 - starCount)}</Text></Text>
             <Text style={styles.overlayText}>{turns} dönüş • {secs.toFixed(1)} sn{deaths ? " • " + deaths + " ölüm" : ""}</Text>
             <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
-              <Pressable onPress={() => resetLevel(false)} style={styles.btnGhost}><Text style={styles.btnGhostText}>↻ Tekrar</Text></Pressable>
-              <Pressable onPress={() => setLevelIndex(lastLevel ? 0 : levelIndex + 1)} style={styles.btn}><Text style={styles.btnText}>{lastLevel ? "Başa dön" : "Sonraki ▶"}</Text></Pressable>
+              <Pressable onPress={() => resetLevel(false)} style={[styles.btnGhost, { borderColor: accent }]}><Text style={[styles.btnGhostText, { color: accent }]}>↻ Tekrar</Text></Pressable>
+              <Pressable onPress={() => setLevelIndex(lastLevel ? 0 : levelIndex + 1)} style={[styles.btn, { backgroundColor: accent }]}><Text style={styles.btnText}>{lastLevel ? "Başa dön" : "Sonraki ▶"}</Text></Pressable>
             </View>
           </View>}
+
+          {phase === "won" && <Confetti w={size} h={size} />}
         </View>
-      </View>
+      </Animated.View>
     </View>
 
     <Text style={styles.footer}>Sol yarıya dokun: dünya sola döner • Sağ yarıya dokun: dünya sağa döner</Text>
@@ -212,40 +302,39 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#0b1512" },
+  safe: { flex: 1, backgroundColor: "#060d0b", overflow: "hidden" },
+  blob: { position: "absolute", borderRadius: 400 },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 10 },
-  eyebrow: { fontSize: 9, letterSpacing: 3, color: "#c8a65b", fontWeight: "800" },
-  title: { fontSize: 24, fontWeight: "900", letterSpacing: 1.5, color: "#f4ead5", marginTop: 3 },
-  restart: { backgroundColor: "#c49b4a", paddingVertical: 9, paddingHorizontal: 13, borderRadius: 12 },
-  restartText: { color: "#17231d", fontWeight: "900", fontSize: 12 },
+  eyebrow: { fontSize: 9, letterSpacing: 3, fontWeight: "800" },
+  title: { fontSize: 26, fontWeight: "900", letterSpacing: 2, color: "#f4ead5", marginTop: 2, textShadowColor: "rgba(255,255,255,.25)", textShadowRadius: 8, textShadowOffset: { width: 0, height: 0 } },
+  iconBtn: { backgroundColor: "rgba(255,255,255,.07)", borderWidth: 1, borderColor: "rgba(255,255,255,.12)", paddingVertical: 8, paddingHorizontal: 11, borderRadius: 12 },
+  restart: { paddingVertical: 9, paddingHorizontal: 13, borderRadius: 12, justifyContent: "center" },
+  restartText: { color: "#0b1512", fontWeight: "900", fontSize: 12 },
   chips: { flexDirection: "row", gap: 6, paddingHorizontal: 16, marginTop: 12, flexWrap: "wrap" },
-  chip: { minWidth: 38, paddingVertical: 5, paddingHorizontal: 8, borderRadius: 10, backgroundColor: "#16271f", borderWidth: 1, borderColor: "#2e4438", alignItems: "center" },
-  chipActive: { backgroundColor: "#c49b4a", borderColor: "#e4c77f" },
-  chipLocked: { opacity: .5 },
+  chip: { minWidth: 38, paddingVertical: 5, paddingHorizontal: 8, borderRadius: 10, backgroundColor: "rgba(255,255,255,.05)", borderWidth: 1, borderColor: "rgba(255,255,255,.12)", alignItems: "center" },
+  chipLocked: { opacity: .45 },
   chipText: { color: "#d2d9cd", fontWeight: "800", fontSize: 12 },
-  chipTextActive: { color: "#17231d" },
   chipStars: { color: "#ffd86b", fontSize: 7, marginTop: -1 },
   statRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginTop: 12 },
-  stat: { flex: 1, backgroundColor: "#13241d", borderRadius: 12, borderWidth: 1, borderColor: "#2a4036", padding: 9 },
-  statLabel: { fontSize: 8, color: "#a9b5a8", fontWeight: "800", letterSpacing: 1 },
-  statValue: { fontSize: 14, color: "#f2e5c0", fontWeight: "900", marginTop: 3 },
+  stat: { flex: 1, backgroundColor: "rgba(255,255,255,.05)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,.10)", padding: 9 },
+  statLabel: { fontSize: 8, color: "#9fb0a6", fontWeight: "800", letterSpacing: 1 },
+  statValue: { fontSize: 14, color: "#f6ecc8", fontWeight: "900", marginTop: 3 },
   statSub: { fontSize: 10, color: "#8fa093", fontWeight: "700" },
-  boardFrame: { backgroundColor: "#2a1f14", borderRadius: 14, borderWidth: 3, borderColor: "#b98a42", padding: 3, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOpacity: .5, shadowRadius: 14, elevation: 10 },
-  wall: { backgroundColor: "#2f4f42", borderWidth: 1, borderTopColor: "#4c7a66", borderLeftColor: "#3e6554", borderBottomColor: "#1d332a", borderRightColor: "#22392f", borderRadius: 3 },
+  boardFrame: { borderRadius: 16, borderWidth: 2, padding: 5, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,.45)", shadowOpacity: .85, shadowRadius: 18, shadowOffset: { width: 0, height: 0 }, elevation: 12 },
   goalOuter: { borderWidth: 2, borderColor: "#5dffb0", alignItems: "center", justifyContent: "center", shadowColor: "#5dffb0", shadowOpacity: 1, shadowRadius: 10 },
-  goalInner: { backgroundColor: "#5dffb0" },
-  player: { position: "absolute", backgroundColor: "#ffb347", borderWidth: 2, borderColor: "#ffd98a", shadowColor: "#ffb347", shadowOpacity: .9, shadowRadius: 8 },
-  eye: { position: "absolute", backgroundColor: "#2b1a05" },
+  player: { position: "absolute", backgroundColor: "#ffa733", borderWidth: 2, borderColor: "#ffd98a", shadowColor: "#ffa733", shadowOpacity: 1, shadowRadius: 10 },
+  eyeWhite: { position: "absolute", backgroundColor: "#fff", overflow: "hidden" },
   zone: { flex: 1, alignItems: "center", justifyContent: "flex-end", paddingBottom: 8 },
   zoneHint: { color: "rgba(255,255,255,.10)", fontSize: 34, fontWeight: "900" },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(8,16,13,.78)", alignItems: "center", justifyContent: "center", padding: 20 },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(6,12,10,.72)", alignItems: "center", justifyContent: "center", padding: 22 },
+  winOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(6,12,10,.80)", alignItems: "center", justifyContent: "center", padding: 22 },
   overlayTitle: { color: "#ffe9a8", fontSize: 22, fontWeight: "900", letterSpacing: 1.5, textAlign: "center" },
   overlayText: { color: "#d3d9ce", fontSize: 12, marginTop: 8, textAlign: "center", lineHeight: 18 },
   winEmoji: { fontSize: 38, marginBottom: 4 },
   stars: { color: "#ffd86b", fontSize: 30, marginTop: 6, letterSpacing: 4 },
-  btn: { backgroundColor: "#c49b4a", paddingVertical: 11, paddingHorizontal: 18, borderRadius: 12 },
-  btnText: { color: "#17231d", fontWeight: "900", fontSize: 13 },
-  btnGhost: { borderWidth: 1.5, borderColor: "#c49b4a", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 12 },
-  btnGhostText: { color: "#e4c77f", fontWeight: "900", fontSize: 13 },
+  btn: { paddingVertical: 11, paddingHorizontal: 18, borderRadius: 12 },
+  btnText: { color: "#0b1512", fontWeight: "900", fontSize: 13 },
+  btnGhost: { borderWidth: 1.5, paddingVertical: 10, paddingHorizontal: 16, borderRadius: 12 },
+  btnGhostText: { fontWeight: "900", fontSize: 13 },
   footer: { textAlign: "center", fontSize: 10, color: "#718477", marginTop: 14, paddingHorizontal: 16, lineHeight: 15 }
 });

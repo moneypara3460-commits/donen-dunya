@@ -2,9 +2,9 @@
 // Yerçekimi yönleri: 0 aşağı, 1 sol, 2 yukarı, 3 sağ
 export const D=[[0,1],[-1,0],[0,-1],[1,0]];
 export const PS=0.62;      // oyuncu boyutu (kare cinsinden)
-export const RUN=4.2;      // koşu hızı (kare/sn) - hep "ileri" yönde
-export const GRAV=32;      // yerçekimi ivmesi
-export const VMAX=13;      // en yüksek düşme hızı
+export const RUN=3.4;      // koşu hızı (kare/sn) - hep "ileri" yönde
+export const GRAV=28;      // yerçekimi ivmesi
+export const VMAX=11;      // en yüksek düşme hızı
 export const DT=1/60;      // sabit zaman adımı
 
 export function parseLevel(rows){

@@ -11,7 +11,9 @@ Dönünce yerçekimi ve koşu yönü birlikte değişir: zemin duvar, duvar tava
 ## Dosyalar
 - `App.js` ekran, animasyon ve oyun döngüsü
 - `engine.js` fizik ve kurallar (ekrandan bağımsız)
-- `levels.js` bölümler (`#` duvar, `^` diken, `G` hedef, `S` başlangıç)
+- `sound.js` ses efektleri (dosya yok, kodla üretilir)
+- `levels.js` bölümler (11x11 kare olmalı) (`#` duvar, `^` diken, `G` hedef, `S` başlangıç)
 - `tools/solve.js` bölümlerin çözülebilir olduğunu ve par değerini kontrol eder: `node tools/solve.js`
+- `tools/robust.js` bölümün ne kadar affedici olduğunu ölçer (dokunuş zamanı ±0.2 sn kayınca başarı yüzdesi)
 
 Expo Snack'e git deposundan aktarılabilir.

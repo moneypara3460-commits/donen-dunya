@@ -29,3 +29,34 @@ function solve(rows,maxDecisions=260,cap=400000){
   return {ok:false,reason:"none"};
 }
 LEVELS.forEach((L,i)=>{const r=solve(L.rows);console.log(i+1,L.name,"par:",L.par,JSON.stringify(r));});
+
+// --- Zorluk ölçümü: ilk dokunuşu kaç farklı anda yapınca bölüm hâlâ çözülebiliyor? (ne kadar çoksa o kadar kolay)
+function solvableFrom(lv,s0,maxDecisions=200,cap=120000){
+  let frontier=[s0];const seen=new Set([key(s0)]);let total=0;
+  for(let d=0;d<maxDecisions&&frontier.length;d++){
+    const next=[];
+    for(const s of frontier) for(const act of [0,1,2]){
+      const n=simulate(lv,s,act);
+      if(n.status==="dead") continue;
+      if(n.status==="won") return true;
+      const k=key(n); if(seen.has(k)) continue;
+      seen.add(k);total++;next.push(n);
+    }
+    frontier=next;if(total>cap) return false;
+  }
+  return false;
+}
+if(process.argv.includes("--window")){
+  LEVELS.forEach((L,i)=>{
+    const lv=E.parseLevel(L.rows);
+    let s=E.newState(lv),ok=0,tot=0,first=-1,last=-1;
+    for(let d=0;d<40&&s.status==="run";d++){
+      tot++;
+      const a=simulate(lv,s,1),b=simulate(lv,s,2);
+      const good=(a.status!=="dead"&&solvableFrom(lv,a))||(b.status!=="dead"&&solvableFrom(lv,b));
+      if(good){ok++;if(first<0)first=d;last=d;}
+      s=simulate(lv,s,0);
+    }
+    console.log(i+1,L.name,"ilk dokunuş için uygun an sayısı:",ok,"("+(ok*0.1).toFixed(1)+" sn)","aralık:",first,"-",last);
+  });
+}
