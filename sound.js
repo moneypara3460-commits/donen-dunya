@@ -37,6 +37,7 @@ const SOUND_DEFS={
   tick:{total:.1,parts:[{t0:0,f0:900,f1:700,dur:.06,vol:.22,curve:3}]},
   rotate:{total:.22,parts:[{noise:1,cut:.12,cut2:.6,t0:0,dur:.16,vol:.4,curve:2},{t0:0,f0:380,f1:820,dur:.16,vol:.22,curve:2}]},
   die:{total:.5,parts:[{t0:0,f0:320,f1:55,dur:.4,vol:.5,curve:1.5},{noise:1,cut:.45,t0:0,dur:.12,vol:.45,curve:3}]},
+  record:{total:.55,parts:[tone(0,660,.18,.26),tone(.1,880,.18,.26),tone(.2,1320,.3,.26,1.5)]},
   win:{total:1.4,parts:[tone(0,523,.35,.28,1.5),tone(.15,659,.35,.28,1.5),tone(.3,784,.35,.28,1.5),
     tone(.45,1047,.9,.3,1.5),tone(.45,784,.9,.2,1.5),tone(.45,523,.9,.2,1.5),tone(.8,1568,.4,.15,2)]}
 };

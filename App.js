@@ -3,7 +3,7 @@ import {
   View, Text, Pressable, StyleSheet, SafeAreaView, StatusBar,
   Animated, Easing, useWindowDimensions
 } from "react-native";
-import { D, PS, DT, parseLevel, tileAt, newState, rotate, step } from "./engine";
+import { D, PS, DT, parseLevel, tileAt, newState, rotate, step, doorOpenAt } from "./engine";
 import { LEVELS } from "./levels";
 import { playSfx } from "./sound";
 
@@ -51,7 +51,7 @@ const LevelView = memo(function LevelView({ lv, tile, accent }) {
         borderLeftWidth: isWall(c - 1, r) ? 0 : t, borderLeftColor: accent,
         borderRightWidth: isWall(c + 1, r) ? 0 : t, borderRightColor: accent
       }]} />);
-    } else if (ch === " ") {
+    } else if (ch === " " || ch === "B" || ch === "D") {
       items.push(<View key={key} pointerEvents="none" style={[pos, { alignItems: "center", justifyContent: "center" }]}>
         <View style={{ width: tile * .08, height: tile * .08, borderRadius: tile, backgroundColor: rgba(accent, .16) }} />
       </View>);
@@ -66,6 +66,36 @@ const LevelView = memo(function LevelView({ lv, tile, accent }) {
       </View>);
     } else if (ch === "G") {
       items.push(<View key={key} style={pos}><Goal tile={tile} /></View>);
+    }
+  }
+  return <>{items}</>;
+});
+
+// ---------- Kapılar ve düğmeler (durumu değiştiği için ayrı katman) ----------
+const DOOR = "#e055ff";
+const DoorsButtons = memo(function DoorsButtons({ lv, tile, open, lit }) {
+  const items = [];
+  const t = Math.max(2, tile * .09);
+  const isDoor = (c, r) => tileAt(lv, c, r) === "D";
+  for (let r = 0; r < lv.rows; r++) for (let c = 0; c < lv.cols; c++) {
+    const ch = lv.cells[r][c];
+    const pos = { position: "absolute", left: c * tile, top: r * tile, width: tile, height: tile };
+    const key = "x" + r + "-" + c;
+    if (ch === "D") {
+      items.push(<View key={key} pointerEvents="none" style={[pos, {
+        backgroundColor: open ? "rgba(224,85,255,.04)" : "rgba(224,85,255,.30)",
+        borderStyle: open ? "dashed" : "solid",
+        borderTopWidth: isDoor(c, r - 1) ? 0 : t, borderBottomWidth: isDoor(c, r + 1) ? 0 : t,
+        borderLeftWidth: isDoor(c - 1, r) ? 0 : t, borderRightWidth: isDoor(c + 1, r) ? 0 : t,
+        borderColor: open ? "rgba(224,85,255,.35)" : DOOR
+      }]} />);
+    } else if (ch === "B") {
+      const on = lit.split("|").includes(c + "," + r);
+      items.push(<View key={key} pointerEvents="none" style={[pos, { alignItems: "center", justifyContent: "center" }]}>
+        <View style={{ width: tile * .7, height: tile * .7, borderRadius: tile, borderWidth: 2, borderColor: "#ffe066", alignItems: "center", justifyContent: "center", backgroundColor: on ? "rgba(255,224,102,.45)" : "rgba(255,224,102,.08)", shadowColor: "#ffe066", shadowOpacity: on ? 1 : .4, shadowRadius: on ? 12 : 4 }}>
+          <View style={{ width: tile * .28, height: tile * .28, borderRadius: tile, backgroundColor: on ? "#ffe066" : "rgba(255,224,102,.5)" }} />
+        </View>
+      </View>);
     }
   }
   return <>{items}</>;
@@ -106,6 +136,8 @@ export default function App() {
   const [secs, setSecs] = useState(0);
   const [deaths, setDeaths] = useState(0);
   const [soundOn, setSoundOn] = useState(true);
+  const [runCount, setRunCount] = useState(0);   // kaydedilmiş hayalet sayısı
+  const [notice, setNotice] = useState("");
 
   const level = LEVELS[levelIndex];
   const accent = ACCENTS[levelIndex % ACCENTS.length];
@@ -115,6 +147,9 @@ export default function App() {
 
   const stateRef = useRef(newState(lv));
   const trailRef = useRef([]);
+  const runsRef = useRef([]);      // hayaletler: [{path:[{x,y}], button}]
+  const recRef = useRef([]);       // şu anki koşunun kaydı
+  const baseTurnsRef = useRef(0);  // önceki koşularda yapılan dönüşler
   const angleRef = useRef(0);
   const soundRef = useRef(true);
   const angle = useRef(new Animated.Value(0)).current;
@@ -130,9 +165,11 @@ export default function App() {
     return Array.from({ length: 34 }, () => ({ x: rnd() * size, y: rnd() * size, s: 1 + rnd() * 2.2, o: .15 + rnd() * .45 }));
   }, [levelIndex, size]);
 
-  function resetLevel(autoRun) {
+  function resetLevel(autoRun, keepRuns) {
     clearTimeout(deadTimer.current);
+    if (!keepRuns) { runsRef.current = []; baseTurnsRef.current = 0; setRunCount(0); setNotice(""); }
     stateRef.current = newState(lv);
+    recRef.current = [{ x: stateRef.current.x, y: stateRef.current.y }];
     trailRef.current = [];
     angleRef.current = 0;
     angle.stopAnimation(); angle.setValue(0);
@@ -154,7 +191,12 @@ export default function App() {
       if (last === null) last = t;
       acc += Math.min((t - last) / 1000, 0.05); last = t;
       let s = stateRef.current;
-      while (acc >= DT && s.status === "run") { s = step(lv, s, DT); acc -= DT; }
+      while (acc >= DT && s.status === "run") {
+        const runs = runsRef.current;
+        s = step(lv, s, DT, { doorOpen: doorOpenAt(lv, runs, s.frames), held: runs.map(r => r.button) });
+        recRef.current.push({ x: s.x, y: s.y });
+        acc -= DT;
+      }
       stateRef.current = s;
       if ((n++ % 2) === 0) { const tr = trailRef.current; tr.push({ x: s.x, y: s.y }); if (tr.length > 9) tr.shift(); }
       setPos({ x: s.x, y: s.y, g: s.g });
@@ -166,13 +208,24 @@ export default function App() {
         Animated.timing(flash, { toValue: 0, duration: 600, useNativeDriver: true }).start();
         Animated.sequence([-9, 9, -6, 6, -3, 0].map(v => Animated.timing(shake, { toValue: v, duration: 50, useNativeDriver: true }))).start();
         setPhase("dead");
-        deadTimer.current = setTimeout(() => resetLevel(true), 700);
+        deadTimer.current = setTimeout(() => resetLevel(true, true), 700);
+        return;
+      }
+      if (s.status === "button") {
+        // Bu koşu bir düğmede bitti: kaydı hayalet olarak sakla, aynı bölümü yeniden başlat
+        sfx("record");
+        runsRef.current = [...runsRef.current, { path: recRef.current, button: s.button }];
+        baseTurnsRef.current += s.turns;
+        setRunCount(runsRef.current.length);
+        const left = lv.buttons.length - runsRef.current.length;
+        setNotice(left > 0 ? "👻 Hayalet kaydedildi! Şimdi sıradaki düğmeye var." : "👻 Hayalet düğmede bekliyor. Şimdi sen koş, kapı onunla açılacak!");
+        resetLevel(false, true);
         return;
       }
       if (s.status === "won") {
         sfx("win");
-        const par = level.par;
-        const st = s.turns <= par ? 3 : s.turns <= par + 2 ? 2 : 1;
+        const par = level.par, total = baseTurnsRef.current + s.turns;
+        const st = total <= par ? 3 : total <= par + 2 ? 2 : 1;
         setStars(o => ({ ...o, [levelIndex]: Math.max(o[levelIndex] || 0, st) }));
         setUnlocked(u => Math.max(u, Math.min(levelIndex + 1, LEVELS.length - 1)));
         setPhase("won");
@@ -201,6 +254,12 @@ export default function App() {
   const starCount = stars[levelIndex] || 0;
   const lastLevel = levelIndex === LEVELS.length - 1;
   const trail = trailRef.current;
+  const runs = runsRef.current;
+  const frames = stateRef.current.frames;
+  const open = doorOpenAt(lv, runs, frames);
+  const lit = runs.filter(r => frames >= r.path.length - 1).map(r => r.button).join("|");
+  const isGhostLevel = lv.buttons.length > 0;
+  const shownTurns = baseTurnsRef.current + turns;
   const eyeSize = ps * .27, pupil = ps * .13;
   const eyeAt = (side) => { // gözler ileri yönde, iki yanda
     const cx = ps / 2 + fd[0] * ps * .2 + (side * -fd[1]) * ps * .2;
@@ -238,8 +297,9 @@ export default function App() {
 
     <View style={styles.statRow}>
       <View style={styles.stat}><Text style={styles.statLabel}>BÖLÜM</Text><Text style={styles.statValue} numberOfLines={1}>{levelIndex + 1} • {level.name}</Text></View>
-      <View style={styles.stat}><Text style={styles.statLabel}>DÖNÜŞ</Text><Text style={styles.statValue}>{turns} <Text style={styles.statSub}>/ par {level.par}</Text></Text></View>
+      <View style={styles.stat}><Text style={styles.statLabel}>DÖNÜŞ</Text><Text style={styles.statValue}>{shownTurns} <Text style={styles.statSub}>/ par {level.par}</Text></Text></View>
       <View style={styles.stat}><Text style={styles.statLabel}>SÜRE</Text><Text style={styles.statValue}>{secs.toFixed(1)}s</Text></View>
+      {isGhostLevel && <View style={styles.stat}><Text style={styles.statLabel}>KOŞU</Text><Text style={styles.statValue}>👻 {Math.min(runCount + 1, lv.buttons.length + 1)}/{lv.buttons.length + 1}</Text></View>}
     </View>
 
     <View style={{ alignItems: "center", marginTop: 12 }}>
@@ -250,6 +310,14 @@ export default function App() {
 
           <Animated.View style={{ width: size, height: size, transform: [{ rotate: rot }] }}>
             <LevelView lv={lv} tile={tile} accent={accent} />
+            <DoorsButtons lv={lv} tile={tile} open={open} lit={lit} />
+            {/* hayaletler: önceki koşuların kaydını oynatır */}
+            {runs.map((g, gi) => {
+              const f = Math.min(frames, g.path.length - 1), gp = g.path[f];
+              return <View key={"g" + gi} pointerEvents="none" style={{ position: "absolute", left: (gp.x - PS / 2) * tile, top: (gp.y - PS / 2) * tile, width: ps, height: ps, borderRadius: ps * .3, backgroundColor: "rgba(160,235,255,.40)", borderWidth: 2, borderColor: "rgba(200,245,255,.85)", shadowColor: "#8be9ff", shadowOpacity: .9, shadowRadius: 10, alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: ps * .55 }}>👻</Text>
+              </View>;
+            })}
             {/* iz */}
             {trail.map((p, i) => {
               const k = (i + 1) / trail.length, sz = ps * (.25 + .55 * k);
@@ -278,14 +346,14 @@ export default function App() {
 
           {phase === "ready" && <View pointerEvents="none" style={styles.overlay}>
             <Text style={[styles.overlayTitle, { color: accent }]}>DOKUN VE KOŞ</Text>
-            <Text style={styles.overlayText}>{level.hint}</Text>
+            <Text style={styles.overlayText}>{runCount > 0 ? notice : level.hint}</Text>
           </View>}
 
           {phase === "won" && <View pointerEvents="box-none" style={styles.winOverlay}>
             <Text style={styles.winEmoji}>🏁</Text>
             <Text style={styles.overlayTitle}>{lastLevel ? "HEPSİNİ BİTİRDİN!" : "BÖLÜM TAMAM"}</Text>
             <Text style={styles.stars}>{"★".repeat(starCount)}<Text style={{ color: "#3b4d45" }}>{"★".repeat(3 - starCount)}</Text></Text>
-            <Text style={styles.overlayText}>{turns} dönüş • {secs.toFixed(1)} sn{deaths ? " • " + deaths + " ölüm" : ""}</Text>
+            <Text style={styles.overlayText}>{shownTurns} dönüş • {secs.toFixed(1)} sn{deaths ? " • " + deaths + " ölüm" : ""}</Text>
             <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
               <Pressable onPress={() => resetLevel(false)} style={[styles.btnGhost, { borderColor: accent }]}><Text style={[styles.btnGhostText, { color: accent }]}>↻ Tekrar</Text></Pressable>
               <Pressable onPress={() => setLevelIndex(lastLevel ? 0 : levelIndex + 1)} style={[styles.btn, { backgroundColor: accent }]}><Text style={styles.btnText}>{lastLevel ? "Başa dön" : "Sonraki ▶"}</Text></Pressable>

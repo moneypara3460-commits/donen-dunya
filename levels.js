@@ -1,4 +1,4 @@
-// # duvar   ^ diken   G hedef   S başlangıç (yerçekimi aşağı, sağa koşar). Bölümler 11x11 kare olmalı.
+// # duvar  ^ diken  G hedef  S başlangıç  B düğme  D kapı (tüm düğmelere hayalet basınca açılır). Bölümler 11x11 kare olmalı.
 export const LEVELS=[
  {name:"İlk Adım",par:2,hint:"Duvara gelince SAĞA dokun: dünya döner, duvar zemin olur.",rows:[
   "###########",
@@ -95,5 +95,41 @@ export const LEVELS=[
   "#     #####",
   "#       ^ #",
   "#S        #",
+  "###########"]},
+ {name:"İlk Hayalet",par:3,hint:"Önce düğmeye var. Sonra hayaletin düğmede kalır ve kapıyı açar.",rows:[
+  "###########",
+  "#    D    #",
+  "#    D    #",
+  "#    D    #",
+  "#   BD    #",
+  "#    D    #",
+  "#    D    #",
+  "#    D    #",
+  "#    D    #",
+  "#S   D  ^G#",
+  "###########"]},
+ {name:"Tavan Düğmesi",par:4,hint:"Düğme tavanda. Hayaletin onu tutarken sen dikenlerden geç.",rows:[
+  "###########",
+  "#B   D    #",
+  "#    D    #",
+  "#    D    #",
+  "#    D    #",
+  "#    D    #",
+  "#    D   ^#",
+  "#    D    #",
+  "#    D    #",
+  "#S   D ^ G#",
+  "###########"]},
+ {name:"İki Hayalet",par:6,hint:"İki düğme, iki hayalet. Önce biri, sonra öbürü, en son sen.",rows:[
+  "###########",
+  "#  B D    #",
+  "#    D    #",
+  "#    D    #",
+  "#    D    #",
+  "#B   D    #",
+  "#    D    #",
+  "#    D    #",
+  "#    D    #",
+  "#S   D  ^G#",
   "###########"]}
 ];
